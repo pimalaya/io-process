@@ -1,0 +1,49 @@
+[package]
+name = "io-process"
+description = "Set of I/O-free coroutines and runtimes to manage processes"
+version = "0.0.1"
+authors = ["soywod <clement.douin@posteo.net>"]
+rust-version = "1.56"
+edition = "2021"
+license = "MIT"
+categories = ["api-bindings"]
+keywords = ["io-free", "coroutine", "runtime", "process", "command"]
+homepage = "https://pimalaya.org"
+documentation = "https://docs.rs/io-process/latest/io_process"
+repository = "https://github.com/pimalaya/io-process"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+# Enables expansion of ~ and environment variables for command program
+# and arguments.
+#
+expand = ["dep:dirs", "dep:shellexpand"]
+
+# Enables command de/serialization
+#
+serde = ["dep:serde"]
+
+# Enables the blocking, standard runtime
+#
+std = []
+
+# Enables the async, Tokio-based runtime
+#
+tokio = ["dep:tokio"]
+
+[dev-dependencies]
+env_logger = "0.11"
+tempdir = "0.3"
+tokio = { version = "1", features = ["full"] }
+
+[dependencies]
+dirs = { version = "6", optional = true }
+log = "0.4"
+serde = { version = "1", optional = true }
+shellexpand = { version = "3.1", optional = true }
+tokio = { version = "1", default-features = false, features = ["process"], optional = true }
