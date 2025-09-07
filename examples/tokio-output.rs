@@ -1,6 +1,12 @@
 #![cfg(feature = "tokio")]
 
-use io_process::{coroutines::SpawnThenWaitWithOutput, runtimes::tokio::handle, Command};
+use io_process::{
+    command::Command,
+    coroutines::spawn_then_wait_with_output::{
+        SpawnThenWaitWithOutput, SpawnThenWaitWithOutputResult,
+    },
+    runtimes::tokio::handle,
+};
 
 #[tokio::main]
 async fn main() {
@@ -15,10 +21,13 @@ async fn main() {
     let mut arg = None;
     let mut spawn = SpawnThenWaitWithOutput::new(command);
 
-    loop {
+    let output = loop {
         match spawn.resume(arg.take()) {
-            Ok(output) => break println!("output: {output:#?}"),
-            Err(io) => arg = Some(handle(io).await.unwrap()),
+            SpawnThenWaitWithOutputResult::Ok(output) => break output,
+            SpawnThenWaitWithOutputResult::Io(io) => arg = Some(handle(io).await.unwrap()),
+            SpawnThenWaitWithOutputResult::Err(err) => panic!("{err}"),
         }
-    }
+    };
+
+    println!("output: {output:#?}")
 }

@@ -1,12 +1,16 @@
 #![cfg(feature = "std")]
 
-use io_process::{coroutines::SpawnThenWait, runtimes::std::handle, Command};
-use tempdir::TempDir;
+use io_process::{
+    command::Command,
+    coroutines::spawn_then_wait::{SpawnThenWait, SpawnThenWaitResult},
+    runtimes::std::handle,
+};
+use tempfile::tempdir;
 
 fn main() {
     env_logger::init();
 
-    let workdir = TempDir::new("std-exit-status").unwrap();
+    let workdir = tempdir().unwrap();
 
     let mut command = Command::new("touch");
     command.arg(workdir.path().join("file.tmp").to_string_lossy());
@@ -17,12 +21,13 @@ fn main() {
     let mut arg = None;
     let mut spawn = SpawnThenWait::new(command);
 
-    loop {
+    let status = loop {
         match spawn.resume(arg.take()) {
-            Ok(status) => break println!("exit status: {status:#?}"),
-            Err(io) => arg = Some(handle(io).unwrap()),
+            SpawnThenWaitResult::Ok(output) => break output,
+            SpawnThenWaitResult::Io(io) => arg = Some(handle(io).unwrap()),
+            SpawnThenWaitResult::Err(err) => panic!("{err}"),
         }
-    }
+    };
 
-    workdir.close().unwrap();
+    println!("exit status: {status:#?}");
 }

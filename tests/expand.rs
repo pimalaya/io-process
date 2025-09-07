@@ -1,4 +1,10 @@
-use io_process::{coroutines::SpawnThenWaitWithOutput, runtimes::std::handle, Command};
+use io_process::{
+    command::Command,
+    coroutines::spawn_then_wait_with_output::{
+        SpawnThenWaitWithOutput, SpawnThenWaitWithOutputResult,
+    },
+    runtimes::std::handle,
+};
 
 fn echo() -> Command {
     let mut command = Command::new("echo");
@@ -18,8 +24,9 @@ pub fn expand() {
 
     let output = loop {
         match spawn.resume(arg.take()) {
-            Ok(output) => break output,
-            Err(io) => arg = Some(handle(io).unwrap()),
+            SpawnThenWaitWithOutputResult::Ok(output) => break output,
+            SpawnThenWaitWithOutputResult::Io(io) => arg = Some(handle(io).unwrap()),
+            SpawnThenWaitWithOutputResult::Err(err) => panic!("{err}"),
         }
     };
 
@@ -35,8 +42,9 @@ pub fn no_expand() {
 
     let output = loop {
         match spawn.resume(arg.take()) {
-            Ok(output) => break output,
-            Err(io) => arg = Some(handle(io).unwrap()),
+            SpawnThenWaitWithOutputResult::Ok(output) => break output,
+            SpawnThenWaitWithOutputResult::Io(io) => arg = Some(handle(io).unwrap()),
+            SpawnThenWaitWithOutputResult::Err(err) => panic!("{err}"),
         }
     };
 

@@ -145,7 +145,7 @@ impl Command {
     /// If the `expand` cargo feature is enabled, and
     /// [`Command::expand`] is true, then program is also
     /// shell-expanded.
-    pub fn get_program(&self) -> Cow<str> {
+    pub fn get_program(&self) -> Cow<'_, str> {
         #[cfg(feature = "expand")]
         if self.expand {
             return self.expand(&self.program);
@@ -188,7 +188,7 @@ impl Command {
     /// If the `expand` cargo feature is enabled, and
     /// [`Command::expand`] is true, then arguments are also
     /// shell-expanded.
-    pub fn get_args(&self) -> Option<Vec<Cow<str>>> {
+    pub fn get_args(&self) -> Option<Vec<Cow<'_, str>>> {
         let self_args = self.args.as_ref()?;
         let mut args = Vec::with_capacity(self_args.len());
 

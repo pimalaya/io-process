@@ -27,7 +27,11 @@ The loop is the glue between coroutines and runtimes. It makes the coroutine pro
 ### Spawn std blocking command
 
 ```rust,ignore
-use io_process::{coroutines::SpawnThenWait, runtimes::std::handle, Command};
+use io_process::{
+    coroutines::spawn_then_wait::{SpawnThenWaitResult, SpawnThenWait},
+    runtimes::std::handle,
+    command::Command,
+};
 
 let mut command = Command::new("ls");
 command.arg("-al");
@@ -38,8 +42,9 @@ let mut spawn = SpawnThenWait::new(command);
 
 let status = loop {
     match spawn.resume(arg.take()) {
-        Ok(status) => break status,
-        Err(io) => arg = Some(handle(&mut spawn, io).unwrap()),
+        SpawnThenWaitResult::Ok(status) => break status,
+        SpawnThenWaitResult::Io(io) => arg = Some(handle(io).unwrap()),
+        SpawnThenWaitResult::Err(err) => panic!("{err}"),
     }
 }
 ```
@@ -47,7 +52,14 @@ let status = loop {
 ### Spawn tokio async command then wait for output
 
 ```rust,ignore
-use io_process::{coroutines::SpawnThenWaitWithOutput, runtimes::tokio::handle, Command};
+use io_process::{
+    coroutines::spawn_then_wait_with_output::{
+	SpawnThenWaitWithOutputResult,
+        SpawnThenWaitWithOutput,
+    },
+    runtimes::std::handle,
+    command::Command,
+};
 
 let mut command = Command::new("ls");
 command.arg("-al");
@@ -58,8 +70,9 @@ let mut spawn = SpawnThenWaitWithOutput::new(command);
 
 let output = loop {
     match spawn.resume(arg.take()) {
-        Ok(output) => break output,
-        Err(io) => arg = Some(handle(&mut spawn, io).await.unwrap()),
+        SpawnThenWaitWithOutputResult::Ok(status) => break status,
+        SpawnThenWaitWithOutputResult::Io(io) => arg = Some(handle(io).await.unwrap()),
+        SpawnThenWaitWithOutputResult::Err(err) => panic!("{err}"),
     }
 }
 ```
@@ -68,7 +81,17 @@ let output = loop {
 
 Have a look at projects built on the top of this library:
 
-- [comodoro](https://github.com/pimalaya/comodoro): CLI to manage timers
+- [Comodoro](https://github.com/pimalaya/comodoro): CLI to manage timers
+- [Ortie](https://github.com/pimalaya/ortie): CLI to manage OAuth access tokens
+
+## License
+
+This project is licensed under either of:
+
+- [MIT license](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
+
+at your option.
 
 ## Sponsoring
 

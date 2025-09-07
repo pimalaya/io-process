@@ -46,6 +46,7 @@ commit_parsers = [
     { message = "add", group = "Added" },
     { message = "remove", group = "Removed" },
     { message = "delete", group = "Removed" },
+    { message = "build: release", skip = true },
     { message = "^.*: add", group = "Added" },
     { message = "^.*: remove", group = "Removed" },
     { message = "^.*: delete", group = "Removed" },

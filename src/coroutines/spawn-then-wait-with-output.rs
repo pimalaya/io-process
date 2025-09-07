@@ -1,17 +1,49 @@
-use std::process::Output;
+//! I/O-free coroutine to spawn a process and wait for its child's output.
 
 use log::{debug, trace};
+use std::process::Output;
+use thiserror::Error;
 
-use crate::{Command, Io};
+use crate::{command::Command, io::ProcessIo};
 
-/// The I/O-free coroutine for spawning a process then waiting for its
+/// Errors that can occur during the coroutine progression.
+#[derive(Debug, Error)]
+pub enum SpawnThenWaitWithOutputError {
+    /// The coroutine received an invalid argument.
+    ///
+    /// Occurs when the coroutine receives an I/O response from
+    /// another coroutine, which should not happen if the runtime maps
+    /// correctly the arguments.
+    #[error("Invalid argument: expected {0}, got {1:?}")]
+    InvalidArgument(&'static str, ProcessIo),
+
+    /// The command was not initialized.
+    #[error("Command not initialized")]
+    NotInitialized,
+}
+
+/// Output emitted after a coroutine finishes its progression.
+#[derive(Debug)]
+pub enum SpawnThenWaitWithOutputResult {
+    /// The coroutine has successfully terminated its progression.
+    Ok(Output),
+
+    /// A process I/O needs to be performed to make the coroutine progress.
+    Io(ProcessIo),
+
+    /// An error occurred during the coroutine progression.
+    Err(SpawnThenWaitWithOutputError),
+}
+
+/// I/O-free coroutine for spawning a process then waiting for its
 /// child's output.
 ///
 /// This coroutine should be used when you need to collect the child
 /// process' output, from stdout and stderr.
 ///
 /// If you do not need to collect the output, or if you need to pipe
-/// the output to another process, see [`super::SpawnThenWait`].
+/// the output to another process, see
+/// [`super::spawn_then_wait::SpawnThenWait`].
 #[derive(Debug)]
 pub struct SpawnThenWaitWithOutput {
     cmd: Option<Command>,
@@ -26,29 +58,34 @@ impl SpawnThenWaitWithOutput {
     }
 
     /// Makes the coroutine progress.
-    pub fn resume(&mut self, arg: Option<Io>) -> Result<Output, Io> {
+    pub fn resume(&mut self, arg: Option<ProcessIo>) -> SpawnThenWaitWithOutputResult {
         let Some(arg) = arg else {
             let Some(cmd) = self.cmd.take() else {
-                return Err(Io::err("Command not initialized"));
+                return SpawnThenWaitWithOutputResult::Err(
+                    SpawnThenWaitWithOutputError::NotInitialized,
+                );
             };
 
             trace!("break: need I/O to spawn command");
-            return Err(Io::SpawnThenWaitWithOutput(Err(cmd)));
+            return SpawnThenWaitWithOutputResult::Io(ProcessIo::SpawnThenWaitWithOutput(Err(cmd)));
         };
 
         trace!("resume after spawning command");
 
-        let Io::SpawnThenWaitWithOutput(io) = arg else {
-            let err = format!("Expected spawn output, got {arg:?}");
-            return Err(Io::err(err));
+        let ProcessIo::SpawnThenWaitWithOutput(io) = arg else {
+            let err = SpawnThenWaitWithOutputError::InvalidArgument("spawn output", arg);
+            return SpawnThenWaitWithOutputResult::Err(err);
         };
 
         let output = match io {
             Ok(output) => output,
-            Err(cmd) => return Err(Io::SpawnThenWaitWithOutput(Err(cmd))),
+            Err(cmd) => {
+                let io = ProcessIo::SpawnThenWaitWithOutput(Err(cmd));
+                return SpawnThenWaitWithOutputResult::Io(io);
+            }
         };
 
         debug!("spawned command: {:?}", output.status);
-        Ok(output)
+        SpawnThenWaitWithOutputResult::Ok(output)
     }
 }

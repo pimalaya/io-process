@@ -3,9 +3,12 @@
 use std::process::Stdio;
 
 use io_process::{
-    coroutines::{SpawnThenWait, SpawnThenWaitWithOutput},
+    command::Command,
+    coroutines::{
+        spawn_then_wait::{SpawnThenWait, SpawnThenWaitResult},
+        spawn_then_wait_with_output::{SpawnThenWaitWithOutput, SpawnThenWaitWithOutputResult},
+    },
     runtimes::std::handle,
-    Command,
 };
 
 fn main() {
@@ -25,8 +28,9 @@ fn main() {
 
     let (status, stdout) = loop {
         match spawn.resume(arg.take()) {
-            Ok(output) => break (output.status, output.stdout.unwrap()),
-            Err(io) => arg = Some(handle(io).unwrap()),
+            SpawnThenWaitResult::Ok(output) => break (output.status, output.stdout.unwrap()),
+            SpawnThenWaitResult::Io(io) => arg = Some(handle(io).unwrap()),
+            SpawnThenWaitResult::Err(err) => panic!("{err}"),
         }
     };
 
@@ -44,10 +48,13 @@ fn main() {
     let mut arg = None;
     let mut spawn = SpawnThenWaitWithOutput::new(command);
 
-    loop {
+    let output = loop {
         match spawn.resume(arg) {
-            Ok(output) => break println!("output: {output:#?}"),
-            Err(io) => arg = Some(handle(io).unwrap()),
+            SpawnThenWaitWithOutputResult::Ok(output) => break output,
+            SpawnThenWaitWithOutputResult::Io(io) => arg = Some(handle(io).unwrap()),
+            SpawnThenWaitWithOutputResult::Err(err) => panic!("{err}"),
         }
-    }
+    };
+
+    println!("output: {output:#?}")
 }

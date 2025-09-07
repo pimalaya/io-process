@@ -1,16 +1,20 @@
 #![cfg(feature = "tokio")]
 
-use io_process::{coroutines::SpawnThenWait, runtimes::tokio::handle, Command};
-use tempdir::TempDir;
+use io_process::{
+    command::Command,
+    coroutines::spawn_then_wait::{SpawnThenWait, SpawnThenWaitResult},
+    runtimes::tokio::handle,
+};
+use tempfile::tempdir;
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
 
-    let workdir = TempDir::new("std-exit-status").unwrap();
+    let workdir = tempdir().unwrap();
 
     let mut command = Command::new("touch");
-    command.arg(workdir.path().join("file.tmp"));
+    command.arg(workdir.path().join("file.tmp").to_string_lossy());
 
     println!("spawn: {command:#?}");
     println!();
@@ -18,12 +22,13 @@ async fn main() {
     let mut arg = None;
     let mut spawn = SpawnThenWait::new(command);
 
-    loop {
+    let status = loop {
         match spawn.resume(arg.take()) {
-            Ok(status) => break println!("exit status: {status:#?}"),
-            Err(io) => arg = Some(handle(io).await.unwrap()),
+            SpawnThenWaitResult::Ok(output) => break output,
+            SpawnThenWaitResult::Io(io) => arg = Some(handle(io).await.unwrap()),
+            SpawnThenWaitResult::Err(err) => panic!("{err}"),
         }
-    }
+    };
 
-    workdir.close().unwrap();
+    println!("exit status: {status:#?}")
 }

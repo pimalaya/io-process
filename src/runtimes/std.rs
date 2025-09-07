@@ -1,21 +1,20 @@
-//! Module dedicated to the standard, blocking runtime.
+//! The standard, blocking process runtime.
 
 use std::{
     io,
     process::{Command as StdCommand, Output},
 };
 
-use crate::{Command, Io, SpawnOutput};
+use crate::{command::Command, io::ProcessIo, status::SpawnStatus};
 
-/// The main runtime I/O handler.
+/// The standard, blocking process runtime.
 ///
 /// This handler makes use of the standard module [`std::process`] to
 /// spawn processes and wait for exit status or output.
-pub fn handle(io: Io) -> io::Result<Io> {
+pub fn handle(io: ProcessIo) -> io::Result<ProcessIo> {
     match io {
-        Io::Error(err) => Err(io::Error::new(io::ErrorKind::Other, err)),
-        Io::SpawnThenWait(io) => spawn_then_wait(io),
-        Io::SpawnThenWaitWithOutput(io) => spawn_then_wait_with_output(io),
+        ProcessIo::SpawnThenWait(io) => spawn_then_wait(io),
+        ProcessIo::SpawnThenWaitWithOutput(io) => spawn_then_wait_with_output(io),
     }
 }
 
@@ -24,7 +23,7 @@ pub fn handle(io: Io) -> io::Result<Io> {
 /// This function builds a [`std::process::Command`] from the flow's
 /// command builder, spawns a process, collects std{in,out,err} then
 /// waits for the exit status.
-pub fn spawn_then_wait(input: Result<SpawnOutput, Command>) -> io::Result<Io> {
+pub fn spawn_then_wait(input: Result<SpawnStatus, Command>) -> io::Result<ProcessIo> {
     let Err(command) = input else {
         let kind = io::ErrorKind::InvalidInput;
         return Err(io::Error::new(kind, "missing command"));
@@ -37,21 +36,21 @@ pub fn spawn_then_wait(input: Result<SpawnOutput, Command>) -> io::Result<Io> {
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
-    let output = SpawnOutput {
+    let output = SpawnStatus {
         status: child.wait()?,
         stdin: stdin.map(Into::into),
         stdout: stdout.map(Into::into),
         stderr: stderr.map(Into::into),
     };
 
-    Ok(Io::SpawnThenWait(Ok(output)))
+    Ok(ProcessIo::SpawnThenWait(Ok(output)))
 }
 
 /// Spawns a process then wait for its child's output.
 ///
 /// This function builds a [`std::process::Command`] from the flow's
 /// command builder, spawns a process, then waits for the output.
-pub fn spawn_then_wait_with_output(input: Result<Output, Command>) -> io::Result<Io> {
+pub fn spawn_then_wait_with_output(input: Result<Output, Command>) -> io::Result<ProcessIo> {
     let Err(command) = input else {
         let kind = io::ErrorKind::InvalidInput;
         return Err(io::Error::new(kind, "missing command"));
@@ -60,7 +59,7 @@ pub fn spawn_then_wait_with_output(input: Result<Output, Command>) -> io::Result
     let mut command = StdCommand::from(command);
     let output = command.output()?;
 
-    Ok(Io::SpawnThenWaitWithOutput(Ok(output)))
+    Ok(ProcessIo::SpawnThenWaitWithOutput(Ok(output)))
 }
 
 /// Converts a [`Command`] builder to a [`std::process::Command`].

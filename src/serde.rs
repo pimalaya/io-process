@@ -8,7 +8,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
 };
 
-use crate::Command;
+use crate::command::Command;
 
 impl Serialize for Command {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -77,7 +77,7 @@ mod tests {
         Deserialize,
     };
 
-    use crate::Command;
+    use crate::command::Command;
 
     // TODO
     //
