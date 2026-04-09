@@ -1,59 +1,50 @@
-//! Module dedicated to the [`Command`] builder.
+//! I/O-free command builder.
 
-use std::{borrow::Cow, collections::HashMap, fmt, path::PathBuf, process::Stdio};
+use alloc::{
+    borrow::Cow,
+    collections::BTreeMap,
+    string::{String, ToString},
+    vec::Vec,
+};
+use core::fmt;
 
-/// The command builder.
+use crate::stdio::Stdio;
+
+/// I/O-free command builder.
 ///
-/// The aim of this builder is to be able to declare a command using
-/// the same API from [`std::process::Command`], without any I/O
-/// interaction. I/O connectors can then take data from this builder
-/// to build I/O-specific commands.
+/// Describes a process to be spawned without performing any I/O
+/// itself. Runtimes consume this builder to construct and spawn the
+/// actual OS process.
 ///
-/// Refs: [`std::process::Command`]
+/// Mirrors the API of [`std::process::Command`] but uses only
+/// no_std-compatible types.
 #[derive(Default)]
 pub struct Command {
     /// Path to the program.
-    ///
-    /// Refs: [`std::process::Command::get_program`]
     program: String,
 
-    /// Arguments that will be passed to the program.
-    ///
-    /// Refs: [`std::process::Command::get_args`]
+    /// Arguments passed to the program.
     args: Option<Vec<String>>,
 
     /// Environment variables explicitly set for the child process.
-    ///
-    /// Refs: [`std::process::Command::get_envs`]
-    pub envs: Option<HashMap<String, String>>,
+    pub envs: Option<BTreeMap<String, String>>,
 
     /// Working directory of the child process.
-    ///
-    /// Refs: [`std::process::Command::get_current_dir`]
-    pub current_dir: Option<PathBuf>,
+    pub current_dir: Option<String>,
 
-    /// Configuration for the child process's standard input (stdin)
-    /// handle.
-    ///
-    /// Refs: [`std::process::Command::stdin`]
+    /// Configuration for the child process's stdin handle.
     pub stdin: Option<Stdio>,
 
-    /// Configuration for the child process's standard output (stdout)
-    /// handle.
-    ///
-    /// Refs: [`std::process::Command::stdout`]
+    /// Configuration for the child process's stdout handle.
     pub stdout: Option<Stdio>,
 
-    /// Configuration for the child process's standard error (stderr)
-    /// handle.
-    ///
-    /// Refs: [`std::process::Command::stderr`]
+    /// Configuration for the child process's stderr handle.
     pub stderr: Option<Stdio>,
 
-    /// Should shell-expand program and arguments.
+    /// Whether to shell-expand program and arguments.
     ///
-    /// When true, tilde `~` and environment variables `$ENV` are
-    /// expanded for the program and arguments only.
+    /// When `true`, tilde `~` and environment variables `$ENV` are
+    /// expanded for the program and its arguments.
     ///
     /// Requires the `expand` cargo feature.
     #[cfg(feature = "expand")]
@@ -75,19 +66,19 @@ impl fmt::Debug for Command {
         }
 
         if let Some(dir) = &self.current_dir {
-            debug.field("current_dir", &dir);
+            debug.field("current_dir", dir);
         }
 
         if let Some(stdin) = &self.stdin {
-            debug.field("stdin", &stdin);
+            debug.field("stdin", stdin);
         }
 
         if let Some(stdout) = &self.stdout {
-            debug.field("stdout", &stdout);
+            debug.field("stdout", stdout);
         }
 
         if let Some(stderr) = &self.stderr {
-            debug.field("stderr", &stderr);
+            debug.field("stderr", stderr);
         }
 
         #[cfg(feature = "expand")]
@@ -98,12 +89,11 @@ impl fmt::Debug for Command {
 }
 
 impl Command {
-    /// Constructs a new [`Command`] for launching the program at path
-    /// `program`. This is just a builder, it does not launch any
-    /// program on its own. Only I/O connectors do spawn processes.
+    /// Constructs a new [`Command`] for launching the program at
+    /// `program`.
     ///
-    /// Refs: [`std::process::Command::new`]
-    pub fn new<S: ToString>(program: S) -> Self {
+    /// This is a pure builder — it does not spawn any process.
+    pub fn new(program: impl ToString) -> Self {
         Self {
             program: program.to_string(),
             args: None,
@@ -117,6 +107,10 @@ impl Command {
         }
     }
 
+    /// Shell-expands `input`, substituting `~` and `$ENV` variables.
+    ///
+    /// Environment variables set on this command take priority over
+    /// those inherited from the parent process.
     #[cfg(feature = "expand")]
     pub fn expand<'a>(&self, input: &'a str) -> Cow<'a, str> {
         let home_dir = || dirs::home_dir().map(|p| p.to_string_lossy().to_string());
@@ -133,18 +127,15 @@ impl Command {
             }
         };
 
-        if let Ok(input) = shellexpand::full_with_context(input, home_dir, get_env) {
-            return input;
+        if let Ok(expanded) = shellexpand::full_with_context(input, home_dir, get_env) {
+            return expanded;
         }
 
         input.into()
     }
 
-    /// Gets the program as str [`Cow`].
-    ///
-    /// If the `expand` cargo feature is enabled, and
-    /// [`Command::expand`] is true, then program is also
-    /// shell-expanded.
+    /// Returns the program path, shell-expanded if the `expand`
+    /// feature is enabled and [`Command::expand`] is `true`.
     pub fn get_program(&self) -> Cow<'_, str> {
         #[cfg(feature = "expand")]
         if self.expand {
@@ -154,40 +145,25 @@ impl Command {
         Cow::from(&self.program)
     }
 
-    /// Adds an argument to pass to the program.
-    ///
-    /// Refs: [`std::process::Command::arg`]
-    pub fn arg<S: ToString>(&mut self, arg: S) -> &mut Self {
+    /// Appends an argument to the program's argument list.
+    pub fn arg(&mut self, arg: impl ToString) -> &mut Self {
         match &mut self.args {
-            Some(args) => {
-                args.push(arg.to_string());
-            }
-            None => {
-                self.args = Some(vec![arg.to_string()]);
-            }
+            Some(args) => args.push(arg.to_string()),
+            None => self.args = Some(alloc::vec![arg.to_string()]),
         }
         self
     }
 
-    /// Adds multiple arguments to pass to the program.
-    ///
-    /// Refs: [`std::process::Command::args`]
-    pub fn args<I, S>(&mut self, args: I) -> &mut Self
-    where
-        I: IntoIterator<Item = S>,
-        S: ToString,
-    {
+    /// Appends multiple arguments to the program's argument list.
+    pub fn args(&mut self, args: impl IntoIterator<Item = impl ToString>) -> &mut Self {
         for arg in args {
             self.arg(arg);
         }
         self
     }
 
-    /// Gets the arguments as str [`Cow`]s.
-    ///
-    /// If the `expand` cargo feature is enabled, and
-    /// [`Command::expand`] is true, then arguments are also
-    /// shell-expanded.
+    /// Returns the argument list, shell-expanded if the `expand`
+    /// feature is enabled and [`Command::expand`] is `true`.
     pub fn get_args(&self) -> Option<Vec<Cow<'_, str>>> {
         let self_args = self.args.as_ref()?;
         let mut args = Vec::with_capacity(self_args.len());
@@ -205,98 +181,68 @@ impl Command {
         Some(args)
     }
 
-    /// Inserts or updates an explicit environment variable mapping.
-    ///
-    /// Refs: [`std::process::Command::env`]
-    pub fn env<K, V>(&mut self, key: K, val: V) -> &mut Self
-    where
-        K: ToString,
-        V: ToString,
-    {
-        let key = key.to_string();
-        let val = val.to_string();
-
+    /// Inserts or updates an environment variable for the child
+    /// process.
+    pub fn env(&mut self, key: impl ToString, val: impl ToString) -> &mut Self {
         match &mut self.envs {
             Some(envs) => {
-                envs.insert(key, val);
+                envs.insert(key.to_string(), val.to_string());
             }
             None => {
-                self.envs = Some(HashMap::from_iter(Some((key, val))));
+                let mut map = BTreeMap::new();
+                map.insert(key.to_string(), val.to_string());
+                self.envs = Some(map);
             }
         }
         self
     }
 
-    /// Inserts or updates multiple explicit environment variable
-    /// mappings.
-    ///
-    /// Refs: [`std::process::Command::envs`]
-    pub fn envs<I, K, V>(&mut self, vars: I) -> &mut Self
-    where
-        I: IntoIterator<Item = (K, V)>,
-        K: ToString,
-        V: ToString,
-    {
+    /// Inserts or updates multiple environment variables for the
+    /// child process.
+    pub fn envs(
+        &mut self,
+        vars: impl IntoIterator<Item = (impl ToString, impl ToString)>,
+    ) -> &mut Self {
         for (key, val) in vars {
             self.env(key, val);
         }
         self
     }
 
-    /// Removes an explicitly set environment variable and prevents
-    /// inheriting it from a parent process.
-    ///
-    /// Refs: [`std::process::Command::env_remove`]
-    pub fn env_remove<K: AsRef<str>>(&mut self, key: K) -> &mut Self {
+    /// Removes an explicitly set environment variable.
+    pub fn env_remove(&mut self, key: impl AsRef<str>) -> &mut Self {
         if let Some(envs) = &mut self.envs {
             envs.remove(key.as_ref());
         }
         self
     }
 
-    /// Clears all explicitly set environment variables and prevents
-    /// inheriting any parent process environment variables.
-    ///
-    /// Refs: [`std::process::Command::env_clear`]
+    /// Clears all explicitly set environment variables.
     pub fn env_clear(&mut self) -> &mut Self {
-        if let Some(envs) = &mut self.envs {
-            envs.clear();
-        }
         self.envs = None;
         self
     }
 
     /// Sets the working directory for the child process.
-    ///
-    /// Refs: [`std::process::Command::current_dir`]
-    pub fn current_dir<P: Into<PathBuf>>(&mut self, dir: P) -> &mut Self {
-        self.current_dir = Some(dir.into());
+    pub fn current_dir(&mut self, dir: impl ToString) -> &mut Self {
+        self.current_dir = Some(dir.to_string());
         self
     }
 
-    /// Configuration for the child process's standard input (stdin)
-    /// handle.
-    ///
-    /// Refs: [`std::process::Command::stdin`]
-    pub fn stdin<T: Into<Stdio>>(&mut self, cfg: T) -> &mut Command {
+    /// Configures the child process's stdin handle.
+    pub fn stdin(&mut self, cfg: impl Into<Stdio>) -> &mut Self {
         self.stdin = Some(cfg.into());
         self
     }
 
-    /// Configuration for the child process's standard output (stdout)
-    /// handle.
-    ///
-    /// Refs: [`std::process::Command::stdout`]
-    pub fn stdout<T: Into<Stdio>>(&mut self, cfg: T) -> &mut Command {
+    /// Configures the child process's stdout handle.
+    pub fn stdout(&mut self, cfg: impl Into<Stdio>) -> &mut Self {
         self.stdout = Some(cfg.into());
         self
     }
 
-    /// Configuration for the child process's standard error (stderr)
-    /// handle.
-    ///
-    /// Refs: [`std::process::Command::stderr`]
-    pub fn stderr<T: Into<Stdio>>(&mut self, cfg: T) -> &mut Command {
+    /// Configures the child process's stderr handle.
+    pub fn stderr(&mut self, cfg: impl Into<Stdio>) -> &mut Self {
         self.stderr = Some(cfg.into());
         self
     }
@@ -311,21 +257,25 @@ impl Clone for Command {
             command.expand = self.expand;
         }
 
-        if let Some(args) = self.args.as_ref() {
+        if let Some(args) = &self.args {
             for arg in args {
                 command.arg(arg);
             }
         }
 
-        if let Some(envs) = self.envs.as_ref() {
+        if let Some(envs) = &self.envs {
             for (key, val) in envs {
                 command.env(key, val);
             }
         }
 
-        if let Some(dir) = self.current_dir.as_ref() {
+        if let Some(dir) = &self.current_dir {
             command.current_dir(dir);
         }
+
+        command.stdin = self.stdin.clone();
+        command.stdout = self.stdout.clone();
+        command.stderr = self.stderr.clone();
 
         command
     }
@@ -335,23 +285,20 @@ impl Eq for Command {}
 
 impl PartialEq for Command {
     fn eq(&self, other: &Self) -> bool {
-        if self.program != other.program {
-            return false;
-        }
-
-        if self.args != other.args {
-            return false;
-        }
-
-        if self.current_dir != other.current_dir {
-            return false;
-        }
-
-        #[cfg(feature = "expand")]
-        if self.expand != other.expand {
-            return false;
-        }
-
-        true
+        self.program == other.program
+            && self.args == other.args
+            && self.envs == other.envs
+            && self.current_dir == other.current_dir
+            && self.stdin == other.stdin
+            && self.stdout == other.stdout
+            && self.stderr == other.stderr
+            && {
+                #[cfg(feature = "expand")]
+                {
+                    self.expand == other.expand
+                }
+                #[cfg(not(feature = "expand"))]
+                true
+            }
     }
 }

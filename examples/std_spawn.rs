@@ -1,8 +1,14 @@
-#![cfg(feature = "std")]
+//! Example: spawn a command and print its exit status (blocking).
+//!
+//! Run with:
+//!
+//! ```sh
+//! cargo run --example std_spawn --features std
+//! ```
 
 use io_process::{
     command::Command,
-    coroutines::spawn_then_wait::{SpawnThenWait, SpawnThenWaitResult},
+    coroutines::spawn::{Spawn, SpawnResult},
     runtimes::std::handle,
 };
 use tempfile::tempdir;
@@ -19,13 +25,13 @@ fn main() {
     println!();
 
     let mut arg = None;
-    let mut spawn = SpawnThenWait::new(command);
+    let mut spawn = Spawn::new(command);
 
     let status = loop {
         match spawn.resume(arg.take()) {
-            SpawnThenWaitResult::Ok(output) => break output,
-            SpawnThenWaitResult::Io(io) => arg = Some(handle(io).unwrap()),
-            SpawnThenWaitResult::Err(err) => panic!("{err}"),
+            SpawnResult::Ok { status } => break status,
+            SpawnResult::Io { input } => arg = Some(handle(input).unwrap()),
+            SpawnResult::Err { err } => panic!("{err}"),
         }
     };
 

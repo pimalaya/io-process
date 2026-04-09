@@ -1,68 +1,126 @@
-//! The standard, blocking process runtime.
+//! Synchronous process runtime backed by [`std::process`].
 
 use std::{
-    io,
-    process::{Command as StdCommand, Output},
+    io::{self, Write},
+    process::{Command as StdCommand, Stdio as StdStdio},
 };
 
-use crate::{command::Command, io::ProcessIo, status::SpawnStatus};
+use crate::{
+    command::Command,
+    io::{ProcessInput, ProcessOutput},
+    status::ExitStatus,
+};
 
-/// The standard, blocking process runtime.
-///
-/// This handler makes use of the standard module [`std::process`] to
-/// spawn processes and wait for exit status or output.
-pub fn handle(io: ProcessIo) -> io::Result<ProcessIo> {
-    match io {
-        ProcessIo::SpawnThenWait(io) => spawn_then_wait(io),
-        ProcessIo::SpawnThenWaitWithOutput(io) => spawn_then_wait_with_output(io),
+/// Processes a [`ProcessInput`] request synchronously using
+/// [`std::process`].
+pub fn handle(input: ProcessInput) -> io::Result<ProcessOutput> {
+    match input {
+        ProcessInput::Spawn { cmd } => spawn(cmd),
+        ProcessInput::SpawnOut { cmd } => spawn_out(cmd),
+        ProcessInput::SpawnIn { cmd, stdin } => spawn_in(cmd, stdin),
+        ProcessInput::SpawnPipeline { cmds } => spawn_pipeline(cmds),
     }
 }
 
-/// Spawns a process then wait for its child's exit status.
-///
-/// This function builds a [`std::process::Command`] from the flow's
-/// command builder, spawns a process, collects std{in,out,err} then
-/// waits for the exit status.
-pub fn spawn_then_wait(input: Result<SpawnStatus, Command>) -> io::Result<ProcessIo> {
-    let Err(command) = input else {
-        let kind = io::ErrorKind::InvalidInput;
-        return Err(io::Error::new(kind, "missing command"));
-    };
+/// Spawns a process and waits for its exit status.
+pub fn spawn(cmd: Command) -> io::Result<ProcessOutput> {
+    let mut command = StdCommand::from(cmd);
+    let status = command.status()?;
+    Ok(ProcessOutput::Spawn {
+        status: ExitStatus::new(status.code()),
+    })
+}
 
-    let mut command = StdCommand::from(command);
+/// Spawns a process, captures its stdout and stderr, and waits for
+/// its exit status.
+///
+/// Overrides the command's stdout and stderr to [`StdStdio::piped`]
+/// regardless of the [`Stdio`] configuration on the command.
+pub fn spawn_out(cmd: Command) -> io::Result<ProcessOutput> {
+    let mut command = StdCommand::from(cmd);
+    command.stdout(StdStdio::piped());
+    command.stderr(StdStdio::piped());
+    let child = command.spawn()?;
+    let output = child.wait_with_output()?;
+    Ok(ProcessOutput::SpawnOut {
+        status: ExitStatus::new(output.status.code()),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
+}
+
+/// Spawns a process, feeds bytes to its stdin, and waits for its exit
+/// status.
+///
+/// Overrides the command's stdin to [`StdStdio::piped`] regardless of
+/// the [`Stdio`] configuration on the command.
+pub fn spawn_in(cmd: Command, stdin: Vec<u8>) -> io::Result<ProcessOutput> {
+    let mut command = StdCommand::from(cmd);
+    command.stdin(StdStdio::piped());
     let mut child = command.spawn()?;
-
-    let stdin = child.stdin.take();
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-
-    let output = SpawnStatus {
-        status: child.wait()?,
-        stdin: stdin.map(Into::into),
-        stdout: stdout.map(Into::into),
-        stderr: stderr.map(Into::into),
-    };
-
-    Ok(ProcessIo::SpawnThenWait(Ok(output)))
+    if let Some(mut handle) = child.stdin.take() {
+        handle.write_all(&stdin)?;
+    }
+    let status = child.wait()?;
+    Ok(ProcessOutput::SpawnIn {
+        status: ExitStatus::new(status.code()),
+    })
 }
 
-/// Spawns a process then wait for its child's output.
+/// Spawns a pipeline of processes, piping each process's stdout into
+/// the next process's stdin.
 ///
-/// This function builds a [`std::process::Command`] from the flow's
-/// command builder, spawns a process, then waits for the output.
-pub fn spawn_then_wait_with_output(input: Result<Output, Command>) -> io::Result<ProcessIo> {
-    let Err(command) = input else {
-        let kind = io::ErrorKind::InvalidInput;
-        return Err(io::Error::new(kind, "missing command"));
-    };
+/// Returns the last process's exit status, stdout, and stderr.
+pub fn spawn_pipeline(cmds: Vec<Command>) -> io::Result<ProcessOutput> {
+    let n = cmds.len();
+    if n == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "empty pipeline",
+        ));
+    }
 
-    let mut command = StdCommand::from(command);
-    let output = command.output()?;
+    let mut prev_stdout: Option<std::process::ChildStdout> = None;
+    let mut early_children: Vec<std::process::Child> = Vec::new();
+    let mut last_child = None;
 
-    Ok(ProcessIo::SpawnThenWaitWithOutput(Ok(output)))
+    for (i, cmd) in cmds.into_iter().enumerate() {
+        let is_last = i == n - 1;
+        let mut command = StdCommand::from(cmd);
+
+        if let Some(stdout) = prev_stdout.take() {
+            command.stdin(stdout);
+        }
+
+        command.stdout(StdStdio::piped());
+        if is_last {
+            command.stderr(StdStdio::piped());
+        }
+
+        let mut child = command.spawn()?;
+
+        if is_last {
+            last_child = Some(child);
+        } else {
+            prev_stdout = child.stdout.take();
+            early_children.push(child);
+        }
+    }
+
+    let output = last_child.unwrap().wait_with_output()?;
+
+    for mut child in early_children {
+        let _ = child.wait();
+    }
+
+    Ok(ProcessOutput::SpawnPipeline {
+        status: ExitStatus::new(output.status.code()),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
 }
 
-/// Converts a [`Command`] builder to a [`std::process::Command`].
+/// Converts a [`Command`] builder into a [`std::process::Command`].
 impl From<Command> for StdCommand {
     fn from(builder: Command) -> Self {
         let mut command = StdCommand::new(&*builder.get_program());
@@ -80,19 +138,19 @@ impl From<Command> for StdCommand {
         }
 
         if let Some(dir) = builder.current_dir {
-            command.current_dir(dir);
+            command.current_dir(&dir);
         }
 
         if let Some(cfg) = builder.stdin {
-            command.stdin(cfg);
+            command.stdin(StdStdio::from(cfg));
         }
 
         if let Some(cfg) = builder.stdout {
-            command.stdout(cfg);
+            command.stdout(StdStdio::from(cfg));
         }
 
         if let Some(cfg) = builder.stderr {
-            command.stderr(cfg);
+            command.stderr(StdStdio::from(cfg));
         }
 
         command

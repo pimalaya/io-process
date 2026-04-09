@@ -1,8 +1,10 @@
 {
-  description = "Set of I/O-free Rust coroutines and runtimes to manage processes";
+  description = "I/O-free time library written in Rust";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    nixpkgs = {
+      url = "github:nixos/nixpkgs/nixos-25.11";
+    };
     fenix = {
       url = "github:nix-community/fenix/monthly";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -10,7 +12,6 @@
     pimalaya = {
       url = "github:pimalaya/nix";
       flake = false;
-      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 

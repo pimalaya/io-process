@@ -1,13 +1,13 @@
 //! Collection of I/O-free, resumable and composable process state
 //! machines.
 //!
-//! Coroutines emit [I/O] requests that need to be processed by
-//! [runtimes] in order to continue their progression.
+//! Coroutines emit [`ProcessInput`] requests that need to be processed
+//! by [runtimes] in order to continue their progression.
 //!
-//! [I/O]: crate::io::ProcessIo
+//! [`ProcessInput`]: crate::io::ProcessInput
 //! [runtimes]: crate::runtimes
 
-#[path = "spawn-then-wait.rs"]
-pub mod spawn_then_wait;
-#[path = "spawn-then-wait-with-output.rs"]
-pub mod spawn_then_wait_with_output;
+pub mod spawn;
+pub mod spawn_in;
+pub mod spawn_out;
+pub mod spawn_pipeline;

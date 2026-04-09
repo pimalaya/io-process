@@ -1,8 +1,8 @@
+#![cfg(feature = "expand")]
+
 use io_process::{
     command::Command,
-    coroutines::spawn_then_wait_with_output::{
-        SpawnThenWaitWithOutput, SpawnThenWaitWithOutputResult,
-    },
+    coroutines::spawn_out::{SpawnOut, SpawnOutResult},
     runtimes::std::handle,
 };
 
@@ -19,34 +19,42 @@ pub fn expand() {
     let mut command = echo();
     command.expand = true;
 
-    let mut spawn = SpawnThenWaitWithOutput::new(command);
+    let mut spawn = SpawnOut::new(command);
     let mut arg = None;
 
-    let output = loop {
+    let (_, stdout, _) = loop {
         match spawn.resume(arg.take()) {
-            SpawnThenWaitWithOutputResult::Ok(output) => break output,
-            SpawnThenWaitWithOutputResult::Io(io) => arg = Some(handle(io).unwrap()),
-            SpawnThenWaitWithOutputResult::Err(err) => panic!("{err}"),
+            SpawnOutResult::Ok {
+                status,
+                stdout,
+                stderr,
+            } => break (status, stdout, stderr),
+            SpawnOutResult::Io { input } => arg = Some(handle(input).unwrap()),
+            SpawnOutResult::Err { err } => panic!("{err}"),
         }
     };
 
-    assert_eq!("expanded", String::from_utf8_lossy(&output.stdout));
+    assert_eq!("expanded", String::from_utf8_lossy(&stdout));
 }
 
 #[test]
 pub fn no_expand() {
     let _ = env_logger::try_init();
 
-    let mut spawn = SpawnThenWaitWithOutput::new(echo());
+    let mut spawn = SpawnOut::new(echo());
     let mut arg = None;
 
-    let output = loop {
+    let (_, stdout, _) = loop {
         match spawn.resume(arg.take()) {
-            SpawnThenWaitWithOutputResult::Ok(output) => break output,
-            SpawnThenWaitWithOutputResult::Io(io) => arg = Some(handle(io).unwrap()),
-            SpawnThenWaitWithOutputResult::Err(err) => panic!("{err}"),
+            SpawnOutResult::Ok {
+                status,
+                stdout,
+                stderr,
+            } => break (status, stdout, stderr),
+            SpawnOutResult::Io { input } => arg = Some(handle(input).unwrap()),
+            SpawnOutResult::Err { err } => panic!("{err}"),
         }
     };
 
-    assert_eq!("$TEST", String::from_utf8_lossy(&output.stdout));
+    assert_eq!("$TEST", String::from_utf8_lossy(&stdout));
 }

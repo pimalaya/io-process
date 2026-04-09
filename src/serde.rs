@@ -1,11 +1,11 @@
 //! Module dedicated to [`serde`] de/serialization of [`Command`].
 
-use std::fmt;
+use core::fmt;
 
 use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
     de::{Error, SeqAccess, Visitor},
     ser::SerializeSeq,
-    Deserialize, Deserializer, Serialize, Serializer,
 };
 
 use crate::command::Command;
@@ -73,8 +73,8 @@ impl<'de> Visitor<'de> for CommandVisitor {
 #[cfg(test)]
 mod tests {
     use serde::{
-        de::value::{Error, SeqDeserializer, StringDeserializer},
         Deserialize,
+        de::value::{Error, SeqDeserializer, StringDeserializer},
     };
 
     use crate::command::Command;

@@ -1,87 +1,133 @@
-//! The Tokio-based, async process runtime.
+//! Async process runtime backed by [`tokio::process`].
 
-use std::{io, process::Output};
+use std::{io, process::Stdio as StdStdio};
 
-use tokio::process::Command as TokioCommand;
+use tokio::{io::AsyncWriteExt as _, process::Command as TokioCommand};
 
-use crate::{command::Command, io::ProcessIo, status::SpawnStatus};
+use crate::{
+    command::Command,
+    io::{ProcessInput, ProcessOutput},
+    status::ExitStatus,
+};
 
-/// The Tokio-based, async process runtime.
-///
-/// This handler makes use of the [`tokio::process`] module to spawn
-/// processes and wait for exit status or output.
-pub async fn handle(io: ProcessIo) -> io::Result<ProcessIo> {
-    match io {
-        ProcessIo::SpawnThenWait(io) => spawn_then_wait(io).await,
-        ProcessIo::SpawnThenWaitWithOutput(io) => spawn_then_wait_with_output(io).await,
+/// Processes a [`ProcessInput`] request asynchronously using
+/// [`tokio::process`].
+pub async fn handle(input: ProcessInput) -> io::Result<ProcessOutput> {
+    match input {
+        ProcessInput::Spawn { cmd } => spawn(cmd).await,
+        ProcessInput::SpawnOut { cmd } => spawn_out(cmd).await,
+        ProcessInput::SpawnIn { cmd, stdin } => spawn_in(cmd, stdin).await,
+        ProcessInput::SpawnPipeline { cmds } => spawn_pipeline(cmds).await,
     }
 }
 
-/// Spawns a process then wait for its child's exit status.
-///
-/// This function builds a [`std::process::Command`] from the flow's
-/// command builder, spawns a process, collects std{in,out,err} then
-/// waits for the exit status.
-pub async fn spawn_then_wait(input: Result<SpawnStatus, Command>) -> io::Result<ProcessIo> {
-    let Err(command) = input else {
-        let kind = io::ErrorKind::InvalidInput;
-        return Err(io::Error::new(kind, "missing command"));
-    };
+/// Spawns a process and waits for its exit status.
+pub async fn spawn(cmd: Command) -> io::Result<ProcessOutput> {
+    let mut command = TokioCommand::from(cmd);
+    let status = command.status().await?;
+    Ok(ProcessOutput::Spawn {
+        status: ExitStatus::new(status.code()),
+    })
+}
 
-    let mut command = TokioCommand::from(command);
+/// Spawns a process, captures its stdout and stderr, and waits for
+/// its exit status.
+///
+/// Overrides the command's stdout and stderr to [`StdStdio::piped`]
+/// regardless of the [`Stdio`] configuration on the command.
+pub async fn spawn_out(cmd: Command) -> io::Result<ProcessOutput> {
+    let mut command = TokioCommand::from(cmd);
+    command.stdout(StdStdio::piped());
+    command.stderr(StdStdio::piped());
+    let child = command.spawn()?;
+    let output = child.wait_with_output().await?;
+    Ok(ProcessOutput::SpawnOut {
+        status: ExitStatus::new(output.status.code()),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
+}
+
+/// Spawns a process, feeds bytes to its stdin, and waits for its exit
+/// status.
+///
+/// Overrides the command's stdin to [`StdStdio::piped`] regardless of
+/// the [`Stdio`] configuration on the command.
+pub async fn spawn_in(cmd: Command, stdin: Vec<u8>) -> io::Result<ProcessOutput> {
+    let mut command = TokioCommand::from(cmd);
+    command.stdin(StdStdio::piped());
     let mut child = command.spawn()?;
-
-    #[cfg(unix)]
-    let stdin = child.stdin.take().and_then(|io| io.into_owned_fd().ok());
-    #[cfg(windows)]
-    let stdin = child
-        .stdin
-        .take()
-        .and_then(|io| io.into_owned_handle().ok());
-
-    #[cfg(unix)]
-    let stdout = child.stdout.take().and_then(|io| io.into_owned_fd().ok());
-    #[cfg(windows)]
-    let stdout = child
-        .stdout
-        .take()
-        .and_then(|io| io.into_owned_handle().ok());
-
-    #[cfg(unix)]
-    let stderr = child.stderr.take().and_then(|io| io.into_owned_fd().ok());
-    #[cfg(windows)]
-    let stderr = child
-        .stderr
-        .take()
-        .and_then(|io| io.into_owned_handle().ok());
-
-    let output = SpawnStatus {
-        status: child.wait().await?,
-        stdin: stdin.map(Into::into),
-        stdout: stdout.map(Into::into),
-        stderr: stderr.map(Into::into),
-    };
-
-    Ok(ProcessIo::SpawnThenWait(Ok(output)))
+    if let Some(mut handle) = child.stdin.take() {
+        handle.write_all(&stdin).await?;
+        handle.shutdown().await?;
+    }
+    let status = child.wait().await?;
+    Ok(ProcessOutput::SpawnIn {
+        status: ExitStatus::new(status.code()),
+    })
 }
 
-/// Spawns a process then wait for its child's output.
+/// Spawns a pipeline of processes, piping each process's stdout into
+/// the next process's stdin.
 ///
-/// This function builds a [`std::process::Command`] from the flow's
-/// command builder, spawns a process, then waits for the output.
-pub async fn spawn_then_wait_with_output(input: Result<Output, Command>) -> io::Result<ProcessIo> {
-    let Err(command) = input else {
-        let kind = io::ErrorKind::InvalidInput;
-        return Err(io::Error::new(kind, "missing command"));
-    };
+/// Returns the last process's exit status, stdout, and stderr.
+pub async fn spawn_pipeline(cmds: Vec<Command>) -> io::Result<ProcessOutput> {
+    let n = cmds.len();
+    if n == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "empty pipeline",
+        ));
+    }
 
-    let mut command = TokioCommand::from(command);
-    let output = command.output().await?;
+    let mut prev_stdout: Option<tokio::process::ChildStdout> = None;
+    let mut early_children: Vec<tokio::process::Child> = Vec::new();
+    let mut last_child = None;
 
-    Ok(ProcessIo::SpawnThenWaitWithOutput(Ok(output)))
+    for (i, cmd) in cmds.into_iter().enumerate() {
+        let is_last = i == n - 1;
+        let mut command = TokioCommand::from(cmd);
+
+        if let Some(stdout) = prev_stdout.take() {
+            #[cfg(unix)]
+            if let Ok(fd) = stdout.into_owned_fd() {
+                command.stdin(fd);
+            }
+            #[cfg(windows)]
+            if let Ok(handle) = stdout.into_owned_handle() {
+                command.stdin(handle);
+            }
+        }
+
+        command.stdout(StdStdio::piped());
+        if is_last {
+            command.stderr(StdStdio::piped());
+        }
+
+        let mut child = command.spawn()?;
+
+        if is_last {
+            last_child = Some(child);
+        } else {
+            prev_stdout = child.stdout.take();
+            early_children.push(child);
+        }
+    }
+
+    let output = last_child.unwrap().wait_with_output().await?;
+
+    for mut child in early_children {
+        let _ = child.wait().await;
+    }
+
+    Ok(ProcessOutput::SpawnPipeline {
+        status: ExitStatus::new(output.status.code()),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
 }
 
-/// Converts a [`Command`] builder to a [`std::process::Command`].
+/// Converts a [`Command`] builder into a [`tokio::process::Command`].
 impl From<Command> for TokioCommand {
     fn from(builder: Command) -> Self {
         let mut command = TokioCommand::new(&*builder.get_program());
@@ -99,19 +145,19 @@ impl From<Command> for TokioCommand {
         }
 
         if let Some(dir) = builder.current_dir {
-            command.current_dir(dir);
+            command.current_dir(&dir);
         }
 
         if let Some(cfg) = builder.stdin {
-            command.stdin(cfg);
+            command.stdin(StdStdio::from(cfg));
         }
 
         if let Some(cfg) = builder.stdout {
-            command.stdout(cfg);
+            command.stdout(StdStdio::from(cfg));
         }
 
         if let Some(cfg) = builder.stderr {
-            command.stderr(cfg);
+            command.stderr(StdStdio::from(cfg));
         }
 
         command

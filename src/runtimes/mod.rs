@@ -1,12 +1,16 @@
-//! Collection of process I/O handlers.
+//! Collection of process runtimes.
 //!
-//! The I/O handler contains all the I/O logic. It takes input from
-//! the coroutine, processes the requested I/O, then puts the output
-//! back inside the coroutine.
+//! A runtime contains all the I/O logic, and is responsible for
+//! processing [`ProcessInput`] requests emitted by [coroutines] and
+//! returning the corresponding [`ProcessOutput`].
 //!
-//! If you miss a handler matching your requirements, you can easily
+//! If you miss a runtime matching your requirements, you can easily
 //! implement your own by taking example on the existing ones. PRs are
 //! welcomed!
+//!
+//! [`ProcessInput`]: crate::io::ProcessInput
+//! [`ProcessOutput`]: crate::io::ProcessOutput
+//! [coroutines]: crate::coroutines
 
 #[cfg(feature = "std")]
 pub mod std;

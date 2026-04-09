@@ -1,31 +1,62 @@
-//! Process I/O requests and responses.
+//! Process input and output.
 
-use std::process::Output as SpawnOutput;
+use alloc::vec::Vec;
 
-use crate::{command::Command, status::SpawnStatus};
+use crate::{command::Command, status::ExitStatus};
 
-/// The process I/O request enum, emitted by [coroutines] and
-/// processed by [runtimes].
+/// Process input emitted by [coroutines] and processed by [runtimes].
 ///
-/// Represents all the possible I/O requests that a stream coroutine
-/// can emit. Runtimes should be able to handle all variants.
+/// Represents all the possible operations that a process coroutine
+/// can ask for. Runtimes must handle all variants and return a
+/// matching [`ProcessOutput`].
 ///
 /// [coroutines]: crate::coroutines
 /// [runtimes]: crate::runtimes
 #[derive(Debug)]
-pub enum ProcessIo {
-    /// I/O for spawning a process and waiting for its exit status.
-    ///
-    /// Input: command
-    ///
-    /// Output: spawn status
-    SpawnThenWait(Result<SpawnStatus, Command>),
+pub enum ProcessInput {
+    /// Request to spawn a process and wait for its exit status.
+    Spawn { cmd: Command },
+    /// Request to spawn a process, capture its stdout and stderr,
+    /// and wait for its exit status.
+    SpawnOut { cmd: Command },
+    /// Request to spawn a process, feed bytes to its stdin, and wait
+    /// for its exit status.
+    SpawnIn { cmd: Command, stdin: Vec<u8> },
+    /// Request to spawn a pipeline of processes, feeding each
+    /// process's stdout into the next process's stdin, and collecting
+    /// the last process's stdout, stderr, and exit status.
+    SpawnPipeline { cmds: Vec<Command> },
+}
 
-    /// I/O for spawning a process and waiting for its exit status and
-    /// any potential output from stdout or stderr.
-    ///
-    /// Input: command
-    ///
-    /// Output: spawn output
-    SpawnThenWaitWithOutput(Result<SpawnOutput, Command>),
+/// Process output returned by [runtimes] after processing a
+/// [`ProcessInput`].
+///
+/// Each variant corresponds to the matching [`ProcessInput`] variant
+/// and carries the data produced by the I/O operation.
+///
+/// [runtimes]: crate::runtimes
+#[derive(Debug)]
+pub enum ProcessOutput {
+    /// Response to a [`ProcessInput::Spawn`] request.
+    Spawn { status: ExitStatus },
+    /// Response to a [`ProcessInput::SpawnOut`] request.
+    SpawnOut {
+        /// The exit status of the process.
+        status: ExitStatus,
+        /// The raw bytes written to stdout.
+        stdout: Vec<u8>,
+        /// The raw bytes written to stderr.
+        stderr: Vec<u8>,
+    },
+    /// Response to a [`ProcessInput::SpawnIn`] request.
+    SpawnIn { status: ExitStatus },
+    /// Response to a [`ProcessInput::SpawnPipeline`] request.
+    SpawnPipeline {
+        /// The exit status of the process.
+        status: ExitStatus,
+        /// The raw bytes written to stdout.
+        stdout: Vec<u8>,
+        /// The raw bytes written to stderr.
+        stderr: Vec<u8>,
+    },
 }
