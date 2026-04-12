@@ -38,9 +38,9 @@ pub enum ProcessInput {
 #[derive(Debug)]
 pub enum ProcessOutput {
     /// Response to a [`ProcessInput::Spawn`] request.
-    Spawn { status: ExitStatus },
+    Spawned { status: ExitStatus },
     /// Response to a [`ProcessInput::SpawnOut`] request.
-    SpawnOut {
+    SpawnedOut {
         /// The exit status of the process.
         status: ExitStatus,
         /// The raw bytes written to stdout.
@@ -49,9 +49,9 @@ pub enum ProcessOutput {
         stderr: Vec<u8>,
     },
     /// Response to a [`ProcessInput::SpawnIn`] request.
-    SpawnIn { status: ExitStatus },
+    SpawnedIn { status: ExitStatus },
     /// Response to a [`ProcessInput::SpawnPipeline`] request.
-    SpawnPipeline {
+    SpawnedPipeline {
         /// The exit status of the process.
         status: ExitStatus,
         /// The raw bytes written to stdout.

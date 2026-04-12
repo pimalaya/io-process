@@ -1,32 +1,32 @@
-//! I/O-free coroutine to spawn a process and capture its output.
-
-use log::{debug, trace};
-use thiserror::Error;
+//! I/O-free coroutine to spawn a process and wait for its exit
+//! status.
 
 use alloc::vec::Vec;
+use core::mem;
+
+use log::trace;
+use thiserror::Error;
 
 use crate::{
     command::Command,
+    coroutines::spawn::ProcessSpawnState,
     io::{ProcessInput, ProcessOutput},
     status::ExitStatus,
 };
 
-/// Error emitted by the [`SpawnOut`] coroutine.
+/// Error emitted by the [`Spawn`] coroutine.
 #[derive(Debug, Error)]
-pub enum SpawnOutError {
-    /// The coroutine received an unexpected [`ProcessOutput`] variant.
-    #[error("Invalid spawn-out arg: {0:?}")]
-    InvalidArg(ProcessOutput),
-
-    /// [`SpawnOut::resume`] was called with `None` after the command
-    /// was already consumed.
-    #[error("Command not initialized")]
-    NotInitialized,
+pub enum ProcessSpawnOutError {
+    #[error("Invalid process spawn arg {arg:?} for state {state:?}")]
+    Invalid {
+        arg: Option<ProcessOutput>,
+        state: ProcessSpawnState,
+    },
 }
 
-/// Result emitted on each step of the [`SpawnOut`] coroutine.
+/// Result emitted on each step of the [`Spawn`] coroutine.
 #[derive(Debug)]
-pub enum SpawnOutResult {
+pub enum ProcessSpawnOutResult {
     /// The coroutine has successfully terminated its progression.
     Ok {
         status: ExitStatus,
@@ -37,63 +37,59 @@ pub enum SpawnOutResult {
     /// progress.
     Io { input: ProcessInput },
     /// The coroutine encountered an unrecoverable error.
-    Err { err: SpawnOutError },
+    Err { err: ProcessSpawnOutError },
 }
 
-/// I/O-free coroutine for spawning a process and capturing its stdout
-/// and stderr.
+/// I/O-free coroutine for spawning a process and waiting for its exit
+/// status.
 ///
-/// The runtime captures both streams regardless of the [`Stdio`]
-/// configuration on the command's stdout and stderr fields.
+/// Use this when you only care about whether the process succeeded or
+/// failed. To also capture stdout and stderr, see [`SpawnOut`].
 ///
-/// To only get the exit status without capturing output, see
-/// [`Spawn`]. To feed bytes to stdin, see [`SpawnIn`].
-///
-/// [`Stdio`]: crate::stdio::Stdio
-/// [`Spawn`]: super::spawn::Spawn
-/// [`SpawnIn`]: super::spawn_in::SpawnIn
+/// [`SpawnOut`]: super::spawn_out::SpawnOut
 #[derive(Debug)]
-pub struct SpawnOut {
-    cmd: Option<Command>,
+pub struct ProcessSpawnOut {
+    state: ProcessSpawnState,
 }
 
-impl SpawnOut {
-    /// Creates a new coroutine that will spawn the given command and
-    /// capture its output.
-    pub fn new(cmd: Command) -> Self {
-        trace!("prepare command to be spawned: {cmd:?}");
-        Self { cmd: Some(cmd) }
+impl ProcessSpawnOut {
+    /// Creates a new coroutine that will spawn the given command.
+    pub fn new(cmd: impl Into<Command>) -> Self {
+        let cmd = cmd.into();
+        trace!("prepares process to be spawned: {cmd:?}");
+        let state = ProcessSpawnState::WantsSpawn(cmd);
+        Self { state }
     }
 
-    /// Makes the spawn-out progress.
-    pub fn resume(&mut self, arg: Option<ProcessOutput>) -> SpawnOutResult {
-        match arg {
-            None => {
-                let Some(cmd) = self.cmd.take() else {
-                    return SpawnOutResult::Err {
-                        err: SpawnOutError::NotInitialized,
-                    };
-                };
-                trace!("wants process I/O to spawn command and capture output");
-                SpawnOutResult::Io {
-                    input: ProcessInput::SpawnOut { cmd },
-                }
+    /// Makes the spawn progress.
+    pub fn resume(&mut self, arg: Option<ProcessOutput>) -> ProcessSpawnOutResult {
+        match (mem::take(&mut self.state), arg) {
+            (ProcessSpawnState::WantsSpawn(cmd), None) => {
+                trace!("wants I/O to spawn process and collect output");
+                let input = ProcessInput::SpawnOut { cmd };
+                self.state = ProcessSpawnState::Spawning;
+                ProcessSpawnOutResult::Io { input }
             }
-            Some(ProcessOutput::SpawnOut {
-                status,
-                stdout,
-                stderr,
-            }) => {
-                debug!("resume after spawning command: {:?}", status);
-                SpawnOutResult::Ok {
+            (
+                ProcessSpawnState::Spawning,
+                Some(ProcessOutput::SpawnedOut {
+                    status,
+                    stdout,
+                    stderr,
+                }),
+            ) => {
+                trace!("resumes after spawning process and collecting output");
+                self.state = ProcessSpawnState::Spawned;
+                ProcessSpawnOutResult::Ok {
                     status,
                     stdout,
                     stderr,
                 }
             }
-            Some(output) => SpawnOutResult::Err {
-                err: SpawnOutError::InvalidArg(output),
-            },
+            (state, arg) => {
+                let err = ProcessSpawnOutError::Invalid { arg, state };
+                ProcessSpawnOutResult::Err { err }
+            }
         }
     }
 }

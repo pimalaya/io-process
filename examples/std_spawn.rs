@@ -8,7 +8,7 @@
 
 use io_process::{
     command::Command,
-    coroutines::spawn::{Spawn, SpawnResult},
+    coroutines::spawn::{ProcessSpawn, ProcessSpawnResult},
     runtimes::std::handle,
 };
 use tempfile::tempdir;
@@ -25,13 +25,13 @@ fn main() {
     println!();
 
     let mut arg = None;
-    let mut spawn = Spawn::new(command);
+    let mut spawn = ProcessSpawn::new(command);
 
     let status = loop {
         match spawn.resume(arg.take()) {
-            SpawnResult::Ok { status } => break status,
-            SpawnResult::Io { input } => arg = Some(handle(input).unwrap()),
-            SpawnResult::Err { err } => panic!("{err}"),
+            ProcessSpawnResult::Ok { status } => break status,
+            ProcessSpawnResult::Io { input } => arg = Some(handle(input).unwrap()),
+            ProcessSpawnResult::Err { err } => panic!("{err}"),
         }
     };
 

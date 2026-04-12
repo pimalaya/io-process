@@ -2,6 +2,7 @@
 
 use core::fmt;
 
+use alloc::string::String;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{Error, SeqAccess, Visitor},
@@ -72,6 +73,8 @@ impl<'de> Visitor<'de> for CommandVisitor {
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::{String, ToString};
+
     use serde::{
         Deserialize,
         de::value::{Error, SeqDeserializer, StringDeserializer},

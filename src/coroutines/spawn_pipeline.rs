@@ -78,7 +78,7 @@ impl SpawnPipeline {
                     input: ProcessInput::SpawnPipeline { cmds },
                 }
             }
-            Some(ProcessOutput::SpawnPipeline {
+            Some(ProcessOutput::SpawnedPipeline {
                 status,
                 stdout,
                 stderr,

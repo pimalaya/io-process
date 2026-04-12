@@ -9,6 +9,7 @@ use crate::{
     command::Command,
     io::{ProcessInput, ProcessOutput},
     status::ExitStatus,
+    stdio::Stdio,
 };
 
 /// Processes a [`ProcessInput`] request synchronously using
@@ -26,7 +27,8 @@ pub fn handle(input: ProcessInput) -> io::Result<ProcessOutput> {
 pub fn spawn(cmd: Command) -> io::Result<ProcessOutput> {
     let mut command = StdCommand::from(cmd);
     let status = command.status()?;
-    Ok(ProcessOutput::Spawn {
+
+    Ok(ProcessOutput::Spawned {
         status: ExitStatus::new(status.code()),
     })
 }
@@ -40,9 +42,11 @@ pub fn spawn_out(cmd: Command) -> io::Result<ProcessOutput> {
     let mut command = StdCommand::from(cmd);
     command.stdout(StdStdio::piped());
     command.stderr(StdStdio::piped());
+
     let child = command.spawn()?;
     let output = child.wait_with_output()?;
-    Ok(ProcessOutput::SpawnOut {
+
+    Ok(ProcessOutput::SpawnedOut {
         status: ExitStatus::new(output.status.code()),
         stdout: output.stdout,
         stderr: output.stderr,
@@ -57,12 +61,16 @@ pub fn spawn_out(cmd: Command) -> io::Result<ProcessOutput> {
 pub fn spawn_in(cmd: Command, stdin: Vec<u8>) -> io::Result<ProcessOutput> {
     let mut command = StdCommand::from(cmd);
     command.stdin(StdStdio::piped());
+
     let mut child = command.spawn()?;
+
     if let Some(mut handle) = child.stdin.take() {
         handle.write_all(&stdin)?;
     }
+
     let status = child.wait()?;
-    Ok(ProcessOutput::SpawnIn {
+
+    Ok(ProcessOutput::SpawnedIn {
         status: ExitStatus::new(status.code()),
     })
 }
@@ -113,7 +121,7 @@ pub fn spawn_pipeline(cmds: Vec<Command>) -> io::Result<ProcessOutput> {
         let _ = child.wait();
     }
 
-    Ok(ProcessOutput::SpawnPipeline {
+    Ok(ProcessOutput::SpawnedPipeline {
         status: ExitStatus::new(output.status.code()),
         stdout: output.stdout,
         stderr: output.stderr,
@@ -140,18 +148,44 @@ impl From<Command> for StdCommand {
         if let Some(dir) = builder.current_dir {
             command.current_dir(&dir);
         }
+        match builder.stdin {
+            Some(Stdio::Inherit) => {
+                command.stdin(StdStdio::inherit());
+            }
+            Some(Stdio::Null) => {
+                command.stdin(StdStdio::null());
+            }
+            Some(Stdio::Piped) => {
+                command.stdin(StdStdio::piped());
+            }
+            None => (),
+        };
 
-        if let Some(cfg) = builder.stdin {
-            command.stdin(StdStdio::from(cfg));
-        }
+        match builder.stdout {
+            Some(Stdio::Inherit) => {
+                command.stdout(StdStdio::inherit());
+            }
+            Some(Stdio::Null) => {
+                command.stdout(StdStdio::null());
+            }
+            Some(Stdio::Piped) => {
+                command.stdout(StdStdio::piped());
+            }
+            None => (),
+        };
 
-        if let Some(cfg) = builder.stdout {
-            command.stdout(StdStdio::from(cfg));
-        }
-
-        if let Some(cfg) = builder.stderr {
-            command.stderr(StdStdio::from(cfg));
-        }
+        match builder.stderr {
+            Some(Stdio::Inherit) => {
+                command.stderr(StdStdio::inherit());
+            }
+            Some(Stdio::Null) => {
+                command.stderr(StdStdio::null());
+            }
+            Some(Stdio::Piped) => {
+                command.stderr(StdStdio::piped());
+            }
+            None => (),
+        };
 
         command
     }

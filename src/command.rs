@@ -6,7 +6,6 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::fmt;
 
 use crate::stdio::Stdio;
 
@@ -18,7 +17,7 @@ use crate::stdio::Stdio;
 ///
 /// Mirrors the API of [`std::process::Command`] but uses only
 /// no_std-compatible types.
-#[derive(Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Command {
     /// Path to the program.
     program: String,
@@ -49,43 +48,6 @@ pub struct Command {
     /// Requires the `expand` cargo feature.
     #[cfg(feature = "expand")]
     pub expand: bool,
-}
-
-impl fmt::Debug for Command {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = f.debug_struct("Command");
-
-        debug.field("program", &self.program);
-
-        if let Some(args) = &self.args {
-            debug.field("args", args);
-        }
-
-        if let Some(envs) = &self.envs {
-            debug.field("envs", &envs.keys());
-        }
-
-        if let Some(dir) = &self.current_dir {
-            debug.field("current_dir", dir);
-        }
-
-        if let Some(stdin) = &self.stdin {
-            debug.field("stdin", stdin);
-        }
-
-        if let Some(stdout) = &self.stdout {
-            debug.field("stdout", stdout);
-        }
-
-        if let Some(stderr) = &self.stderr {
-            debug.field("stderr", stderr);
-        }
-
-        #[cfg(feature = "expand")]
-        debug.field("expand", &self.expand);
-
-        debug.finish()
-    }
 }
 
 impl Command {
@@ -245,60 +207,5 @@ impl Command {
     pub fn stderr(&mut self, cfg: impl Into<Stdio>) -> &mut Self {
         self.stderr = Some(cfg.into());
         self
-    }
-}
-
-impl Clone for Command {
-    fn clone(&self) -> Self {
-        let mut command = Command::new(&self.program);
-
-        #[cfg(feature = "expand")]
-        {
-            command.expand = self.expand;
-        }
-
-        if let Some(args) = &self.args {
-            for arg in args {
-                command.arg(arg);
-            }
-        }
-
-        if let Some(envs) = &self.envs {
-            for (key, val) in envs {
-                command.env(key, val);
-            }
-        }
-
-        if let Some(dir) = &self.current_dir {
-            command.current_dir(dir);
-        }
-
-        command.stdin = self.stdin.clone();
-        command.stdout = self.stdout.clone();
-        command.stderr = self.stderr.clone();
-
-        command
-    }
-}
-
-impl Eq for Command {}
-
-impl PartialEq for Command {
-    fn eq(&self, other: &Self) -> bool {
-        self.program == other.program
-            && self.args == other.args
-            && self.envs == other.envs
-            && self.current_dir == other.current_dir
-            && self.stdin == other.stdin
-            && self.stdout == other.stdout
-            && self.stderr == other.stderr
-            && {
-                #[cfg(feature = "expand")]
-                {
-                    self.expand == other.expand
-                }
-                #[cfg(not(feature = "expand"))]
-                true
-            }
     }
 }

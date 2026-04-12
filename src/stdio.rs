@@ -16,14 +16,3 @@ pub enum Stdio {
     /// Create a new pipe for the stream.
     Piped,
 }
-
-#[cfg(feature = "std")]
-impl From<Stdio> for std::process::Stdio {
-    fn from(stdio: Stdio) -> Self {
-        match stdio {
-            Stdio::Inherit => std::process::Stdio::inherit(),
-            Stdio::Null => std::process::Stdio::null(),
-            Stdio::Piped => std::process::Stdio::piped(),
-        }
-    }
-}

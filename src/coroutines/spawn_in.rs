@@ -77,7 +77,7 @@ impl SpawnIn {
                     input: ProcessInput::SpawnIn { cmd, stdin },
                 }
             }
-            Some(ProcessOutput::SpawnIn { status }) => {
+            Some(ProcessOutput::SpawnedIn { status }) => {
                 debug!("resume after spawning command: {status:?}");
                 SpawnInResult::Ok { status }
             }

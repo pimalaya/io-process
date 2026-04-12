@@ -3,7 +3,7 @@
 use io_process::{
     command::Command,
     coroutines::{
-        spawn::{Spawn, SpawnResult},
+        spawn::{ProcessSpawn, ProcessSpawnResult},
         spawn_out::{SpawnOut, SpawnOutResult},
         spawn_pipeline::{SpawnPipeline, SpawnPipelineResult},
     },

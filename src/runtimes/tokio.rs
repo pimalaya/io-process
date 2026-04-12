@@ -2,12 +2,13 @@
 
 use std::{io, process::Stdio as StdStdio};
 
-use tokio::{io::AsyncWriteExt as _, process::Command as TokioCommand};
+use tokio::{io::AsyncWriteExt, process::Command as TokioCommand};
 
 use crate::{
     command::Command,
     io::{ProcessInput, ProcessOutput},
     status::ExitStatus,
+    stdio::Stdio,
 };
 
 /// Processes a [`ProcessInput`] request asynchronously using
@@ -25,7 +26,8 @@ pub async fn handle(input: ProcessInput) -> io::Result<ProcessOutput> {
 pub async fn spawn(cmd: Command) -> io::Result<ProcessOutput> {
     let mut command = TokioCommand::from(cmd);
     let status = command.status().await?;
-    Ok(ProcessOutput::Spawn {
+
+    Ok(ProcessOutput::Spawned {
         status: ExitStatus::new(status.code()),
     })
 }
@@ -39,9 +41,11 @@ pub async fn spawn_out(cmd: Command) -> io::Result<ProcessOutput> {
     let mut command = TokioCommand::from(cmd);
     command.stdout(StdStdio::piped());
     command.stderr(StdStdio::piped());
+
     let child = command.spawn()?;
     let output = child.wait_with_output().await?;
-    Ok(ProcessOutput::SpawnOut {
+
+    Ok(ProcessOutput::SpawnedOut {
         status: ExitStatus::new(output.status.code()),
         stdout: output.stdout,
         stderr: output.stderr,
@@ -56,13 +60,17 @@ pub async fn spawn_out(cmd: Command) -> io::Result<ProcessOutput> {
 pub async fn spawn_in(cmd: Command, stdin: Vec<u8>) -> io::Result<ProcessOutput> {
     let mut command = TokioCommand::from(cmd);
     command.stdin(StdStdio::piped());
+
     let mut child = command.spawn()?;
+
     if let Some(mut handle) = child.stdin.take() {
         handle.write_all(&stdin).await?;
         handle.shutdown().await?;
     }
+
     let status = child.wait().await?;
-    Ok(ProcessOutput::SpawnIn {
+
+    Ok(ProcessOutput::SpawnedIn {
         status: ExitStatus::new(status.code()),
     })
 }
@@ -93,6 +101,7 @@ pub async fn spawn_pipeline(cmds: Vec<Command>) -> io::Result<ProcessOutput> {
             if let Ok(fd) = stdout.into_owned_fd() {
                 command.stdin(fd);
             }
+
             #[cfg(windows)]
             if let Ok(handle) = stdout.into_owned_handle() {
                 command.stdin(handle);
@@ -120,7 +129,7 @@ pub async fn spawn_pipeline(cmds: Vec<Command>) -> io::Result<ProcessOutput> {
         let _ = child.wait().await;
     }
 
-    Ok(ProcessOutput::SpawnPipeline {
+    Ok(ProcessOutput::SpawnedPipeline {
         status: ExitStatus::new(output.status.code()),
         stdout: output.stdout,
         stderr: output.stderr,
@@ -148,17 +157,44 @@ impl From<Command> for TokioCommand {
             command.current_dir(&dir);
         }
 
-        if let Some(cfg) = builder.stdin {
-            command.stdin(StdStdio::from(cfg));
-        }
+        match builder.stdin {
+            Some(Stdio::Inherit) => {
+                command.stdin(StdStdio::inherit());
+            }
+            Some(Stdio::Null) => {
+                command.stdin(StdStdio::null());
+            }
+            Some(Stdio::Piped) => {
+                command.stdin(StdStdio::piped());
+            }
+            None => (),
+        };
 
-        if let Some(cfg) = builder.stdout {
-            command.stdout(StdStdio::from(cfg));
-        }
+        match builder.stdout {
+            Some(Stdio::Inherit) => {
+                command.stdout(StdStdio::inherit());
+            }
+            Some(Stdio::Null) => {
+                command.stdout(StdStdio::null());
+            }
+            Some(Stdio::Piped) => {
+                command.stdout(StdStdio::piped());
+            }
+            None => (),
+        };
 
-        if let Some(cfg) = builder.stderr {
-            command.stderr(StdStdio::from(cfg));
-        }
+        match builder.stderr {
+            Some(Stdio::Inherit) => {
+                command.stderr(StdStdio::inherit());
+            }
+            Some(Stdio::Null) => {
+                command.stderr(StdStdio::null());
+            }
+            Some(Stdio::Piped) => {
+                command.stderr(StdStdio::piped());
+            }
+            None => (),
+        };
 
         command
     }

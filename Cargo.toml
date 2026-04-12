@@ -18,10 +18,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-expand = ["dep:dirs", "dep:shellexpand", "std"]
+expand = ["dep:dirs", "dep:shellexpand"]
 serde = ["dep:serde"]
 std = []
-tokio = ["dep:tokio", "std"]
+tokio = ["dep:tokio"]
 
 [[example]]
 name = "std_spawn"
@@ -61,9 +61,9 @@ tempfile = "3.20"
 tokio = { version = "1", features = ["full"] }
 
 [dependencies]
-dirs = { version = "6", optional = true }
+dirs = { version = "6", default-features = false, optional = true }
 log = { version = "0.4", default-features = false }
-serde = { version = "1", optional = true }
-shellexpand = { version = "3.1", optional = true }
-thiserror = "2"
+serde = { version = "1", default-features = false, features = ["alloc"], optional = true }
+shellexpand = { version = "3.1", default-features = false, features = ["base-0", "tilde"], optional = true }
+thiserror = { version = "2", default-features = false }
 tokio = { version = "1", default-features = false, features = ["io-util", "process"], optional = true }
