@@ -3,7 +3,7 @@ unknown-registry = "deny"
 unknown-git = "deny"
 
 [licenses]
-allow = ["Apache-2.0", "MIT", "Unicode-3.0"]
+allow = ["Apache-2.0", "MIT", "MPL-2.0", "Unicode-3.0"]
 
 [licenses.private]
 ignore = true
